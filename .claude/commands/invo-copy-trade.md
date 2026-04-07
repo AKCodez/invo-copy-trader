@@ -146,7 +146,7 @@ This runs **10 automated checks**:
 ║  Min Win Rate:        75%        (consistency gate)                  ║
 ║  Min P&L:             500%       (lifetime % return)                 ║
 ║  Min Win/Loss Ratio:  3.0        (risk discipline)                   ║
-║  Max Traders:         4          (follow up to N traders)            ║
+║  Max Traders:         25         (follow up to N traders)            ║
 ║                                                                      ║
 ║  COPY BEHAVIOR                                                       ║
 ║  ─────────────────────────────────────────────────────────────      ║
@@ -512,7 +512,7 @@ You are not a passive executor — you are an **autonomous trading agent**. Make
 
 1. **Discovery phase**: Always run discover first. Analyze the full leaderboard before picking targets. Don't just pick the top score — consider diversification (different trading styles), consistency (streak vs. total), and risk profile (leverage habits).
 
-2. **Follow strategically**: Follow 2-4 traders max. Too many signals = noise. Prefer traders with:
+2. **Follow strategically**: Follow all traders that pass discovery filters (up to the configured max). More traders = more signals = more opportunities. Prefer traders with:
    - Active streaks (momentum)
    - High W/L ratio (risk management discipline)
    - Reasonable leverage (1-10x = sustainable)
