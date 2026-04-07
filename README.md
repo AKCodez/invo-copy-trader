@@ -215,6 +215,34 @@ The `baseShortId` is a 10-char client-generated ID required to close positions v
 - **Auth**: JWT auto-refresh via reverse-engineered `/v1_0/auth/refresh_token` endpoint
 - **Crypto**: AES-GCM decryption of FlutterSecureStorage tokens
 
+## Disclaimer
+
+> **USE AT YOUR OWN RISK.** This software is provided "as is", without warranty of any kind, express or implied. The authors and contributors are **not responsible** for any financial losses, liquidations, missed trades, or damages of any kind arising from the use of this software.
+
+**By using this software, you acknowledge and agree that:**
+
+1. **Not Financial Advice.** Nothing in this repository constitutes financial advice, investment advice, trading advice, or any other sort of professional advice. You are solely responsible for your own trading decisions.
+
+2. **No Guaranteed Returns.** Past performance of any trader, strategy, or signal does not guarantee future results. Copy trading is inherently risky and you can lose your entire investment.
+
+3. **Experimental Software.** This project relies on reverse-engineered, undocumented APIs that may change, break, or become unavailable at any time without notice. There is no guarantee of uptime, accuracy, or reliability.
+
+4. **API & Protocol Risk.** This software interacts with third-party platforms (Invo, Hyperliquid) over which the authors have no control. API changes, outages, rate limits, or account restrictions imposed by these platforms are outside the scope of this project.
+
+5. **Smart Contract & DeFi Risk.** Hyperliquid is a decentralized exchange. Transactions are on-chain and irreversible. You accept all risks associated with DeFi protocols, including but not limited to smart contract bugs, oracle failures, and network congestion.
+
+6. **No Affiliation.** This project is **not affiliated with, endorsed by, or associated with** Invo or Hyperliquid in any way. All trademarks belong to their respective owners.
+
+7. **Regulatory Compliance.** You are solely responsible for ensuring that your use of this software complies with all applicable laws and regulations in your jurisdiction. Copy trading and leveraged trading may be restricted or prohibited in certain regions.
+
+8. **Key & Credential Security.** You are responsible for safeguarding your private keys, agent keys, and tokens. The authors are not liable for any unauthorized access or loss of funds resulting from compromised credentials.
+
+9. **Leverage Risk.** Leveraged trading amplifies both gains and losses. Positions can be liquidated, resulting in total loss of margin. Understand leverage before using this software.
+
+10. **No Warranty of Accuracy.** Discovery scores, win rates, P&L figures, and all other metrics are derived from third-party data and may be inaccurate, delayed, or incomplete.
+
+**If you do not agree with any of the above, do not use this software.**
+
 ## License
 
-MIT
+MIT — see above disclaimer. The MIT license's "AS IS" clause applies in full.
