@@ -95,6 +95,7 @@ All commands run via `npx tsx src/commands/<cmd>.ts`.
 | `discover.ts` | Scan & rank top traders | `npx tsx src/commands/discover.ts` |
 | `follow.ts` | Follow/unfollow traders | `npx tsx src/commands/follow.ts follow <userId>` |
 | `monitor.ts` | Real-time signal monitor | `npx tsx src/commands/monitor.ts '["portfolioId"]'` |
+| `monitor.ts` | Feed + trade polling | `npx tsx src/commands/monitor.ts '["pId"]' '[{"baseShortId":"x","mimicStartedAt":"..."}]'` |
 | `monitor.ts` | Wait-for-signal mode | `npx tsx src/commands/monitor.ts --wait-for-signal '["id"]'` |
 | `trade.ts` | Open a position | `npx tsx src/commands/trade.ts SOL long 0.14 5` |
 | `close.ts` | Close a position | `npx tsx src/commands/close.ts SOL [baseShortId]` |
@@ -256,8 +257,11 @@ Composite score: `W/L*20 + WinRate*1.5 + P&L*0.01 + Streak*2 - Losses*0.5`
 |-------|-------|-----|
 | `reduce_only: true` breaks signing | Phantom agent EIP-712 signature recovery fails | Always use `reduce_only: false` |
 | `grouping: 'normalTpsl'` breaks signing | Multi-order grouping causes wrong signer | Always use `grouping: 'na'` |
+| `"Unknown asset: SOL"` | SDK expects `-PERP` suffix | Use `SOL-PERP`, `BTC-PERP`, etc. (handled in `hl-client.ts`) |
+| `"Price must be divisible by tick size"` | Too many decimal places | Use `toPrecision(5)` on prices (handled in `hl-client.ts`) |
 | `"Order has invalid size"` | Wrong szDecimals for the asset | Check asset table above |
 | `"Order price cannot be more than 95% away"` | Position too large for available margin | Reduce size |
+| `/dex/trade` returns 404 | Using your own `baseShortId` instead of the trader's | Use the trader's `baseShortId` from their feed signal |
 | Agent key expired | ~90-day validity | Re-authorize in Invo app |
 | Feed signal delay | Trade posts appear 1-10s after execution | Acceptable for copy trading (not HFT) |
 

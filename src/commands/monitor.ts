@@ -13,12 +13,13 @@ interface WatchEntry {
 async function main() {
   const args = process.argv.slice(2);
   const waitMode = args.includes('--wait-for-signal');
-  const jsonArg = args.find(a => a.startsWith('['));
+  const jsonArgs = args.filter(a => a.startsWith('['));
 
-  if (!jsonArg) {
-    console.error('Usage: monitor [--wait-for-signal] <portfolioIdsOrWatchEntries>');
+  if (jsonArgs.length === 0) {
+    console.error('Usage: monitor [--wait-for-signal] <portfolioIds> [watchEntries]');
     console.error('  Portfolio IDs: \'["id1","id2"]\'');
     console.error('  Watch entries: \'[{"baseShortId":"x","mimicStartedAt":"..."}]\'');
+    console.error('  Both:          \'["id1"]\'  \'[{"baseShortId":"x","mimicStartedAt":"..."}]\'');
     console.error('');
     console.error('Modes:');
     console.error('  default:             Run forever, print all signals as JSON lines');
@@ -26,8 +27,19 @@ async function main() {
     process.exit(1);
   }
 
-  const parsed = JSON.parse(jsonArg);
-  const isWatchEntries = Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.baseShortId;
+  // Parse all JSON args — separate portfolio IDs (strings) from watch entries (objects)
+  let portfolioIds: string[] = [];
+  let watchEntries: WatchEntry[] = [];
+  for (const arg of jsonArgs) {
+    const arr = JSON.parse(arg);
+    if (Array.isArray(arr) && arr.length > 0) {
+      if (typeof arr[0] === 'string') portfolioIds = portfolioIds.concat(arr);
+      else if (arr[0]?.baseShortId) watchEntries = watchEntries.concat(arr);
+    }
+  }
+
+  const isWatchEntries = watchEntries.length > 0;
+  const parsed = isWatchEntries ? watchEntries : portfolioIds;
 
   const seenPosts = new Set<string>();
   const seenUpdates = new Set<string>();
@@ -44,7 +56,7 @@ async function main() {
     // Poll /dex/trade if we have watch entries
     if (isWatchEntries) {
       try {
-        const data = await invo.getTradeUpdates(parsed as WatchEntry[]);
+        const data = await invo.getTradeUpdates(watchEntries);
         const items = (data as any).investments ?? (data as any).items ?? [];
         for (const item of items) {
           const key = `${item.baseShortId ?? item.id}_${item.lastUpdate ?? ''}`;
@@ -133,11 +145,15 @@ async function main() {
     return signalFound;
   };
 
+  const mode = isWatchEntries && portfolioIds.length > 0 ? 'trade_poll+feed'
+    : isWatchEntries ? 'trade_poll'
+    : 'feed_only';
   console.log(JSON.stringify({
     type: 'started',
-    mode: isWatchEntries ? 'trade_poll' : 'feed_only',
+    mode,
     waitForSignal: waitMode,
-    entries: parsed.length,
+    watchEntries: watchEntries.length,
+    portfolioIds: portfolioIds.length,
   }));
 
   // First poll: index existing posts so we only react to new ones

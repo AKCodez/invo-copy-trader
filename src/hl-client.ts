@@ -2,6 +2,11 @@ import { Hyperliquid } from 'hyperliquid';
 
 const INVO_BUILDER = { address: '0x557edb253b1d7ed5f15b248a5a3fd919fa5d3c81', fee: 35 };
 
+// SDK expects "SOL-PERP" format; REST API uses "SOL"
+function toSdkCoin(coin: string): string {
+  return coin.includes('-') ? coin : `${coin}-PERP`;
+}
+
 let sdk: Hyperliquid | null = null;
 
 export async function connect(agentKey: string, walletAddress: string): Promise<Hyperliquid> {
@@ -51,7 +56,7 @@ export async function getPositions(wallet: string) {
 
 export async function setLeverage(coin: string, leverage: number) {
   const s = getSdk();
-  return s.exchange.updateLeverage(coin, 'isolated', leverage);
+  return s.exchange.updateLeverage(toSdkCoin(coin), 'isolated', leverage);
 }
 
 export async function placeMarketOrder(
@@ -64,13 +69,12 @@ export async function placeMarketOrder(
   const mid = parseFloat(mids[coin]);
   if (!mid) throw new Error(`No mid price for ${coin}`);
 
-  const limitPx = isBuy
-    ? (mid * (1 + slippagePct)).toPrecision(6)
-    : (mid * (1 - slippagePct)).toPrecision(6);
+  const rawPx = isBuy ? mid * (1 + slippagePct) : mid * (1 - slippagePct);
+  const limitPx = parseFloat(rawPx.toPrecision(5)).toString();
 
   const s = getSdk();
   return s.exchange.placeOrder({
-    coin,
+    coin: toSdkCoin(coin),
     is_buy: isBuy,
     sz: parseFloat(size),
     limit_px: parseFloat(limitPx),

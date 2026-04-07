@@ -301,9 +301,16 @@ Or with watch entries for active mimic positions:
 cd ~/Invo && npx tsx src/commands/monitor.ts '[{"baseShortId":"x","mimicStartedAt":"2024-01-01T00:00:00Z"}]'
 ```
 
+Or **both simultaneously** (feed + trade polling — recommended when you have open positions):
+```bash
+cd ~/Invo && npx tsx src/commands/monitor.ts '["portfolioId1","portfolioId2"]' '[{"baseShortId":"x","mimicStartedAt":"..."}]'
+```
+
+**IMPORTANT: The monitor accepts multiple JSON array arguments.** String arrays are treated as portfolio IDs (feed polling), object arrays with `baseShortId` are treated as watch entries (trade polling). Pass both to get both modes at once.
+
 **How it works:**
-- Polls `POST /dex/trade` every 5 seconds (trade status updates)
-- Polls `POST /v1_0/posts/get_feed` (filter: `following`) every 15 seconds (new signals)
+- Polls `POST /dex/trade` every 5 seconds (trade status updates) — only when watch entries provided
+- Polls `POST /v1_0/posts/get_feed` (filter: `following`) every 5 seconds (new signals)
 - Deduplicates by post ID / update key
 - Outputs JSON lines to stdout:
   - `{"type":"started",...}` — initial status
@@ -333,12 +340,16 @@ cd ~/Invo && npx tsx src/commands/monitor.ts '[{"baseShortId":"x","mimicStartedA
 **Use `--wait-for-signal` mode for efficient, reactive monitoring.** This is the recommended approach — zero polling, zero wasted tokens:
 
 ```bash
+# Feed only (no open positions)
 cd ~/Invo && npx tsx src/commands/monitor.ts --wait-for-signal '["portfolioId1","portfolioId2"]'
+
+# Feed + trade polling (when you have open positions to watch)
+cd ~/Invo && npx tsx src/commands/monitor.ts --wait-for-signal '["portfolioId1","portfolioId2"]' '[{"baseShortId":"x","mimicStartedAt":"..."}]'
 ```
 
 **How it works:**
 1. Launch via Bash with `run_in_background: true`
-2. The monitor polls the Invo API internally (feed every 15s, trades every 5s)
+2. The monitor polls the Invo API internally (feed every 5s, trades every 5s)
 3. It skips existing posts on startup (only reacts to NEW signals)
 4. **When a new signal arrives, it prints the signal JSON and exits**
 5. Claude gets auto-notified that the background process completed
@@ -537,12 +548,16 @@ You are not a passive executor — you are an **autonomous trading agent**. Make
 
 Keep track of open positions mentally:
 - Which coin, direction, size, leverage
-- The `baseShortId` (needed for clean close)
+- **Your `baseShortId`** from `trade.ts` output (needed for `/dex/position/close`)
+- **Trader's `baseShortId`** from the signal `mimicMeta` (needed for `/dex/trade` polling)
 - Entry price (from trade output)
 - Which trader you copied
 
 ### Error Recovery
 
+- **"Unknown asset: SOL"**: The HL SDK (v1.7.7) requires `-PERP` suffix (e.g., `SOL-PERP`). The `hl-client.ts` `toSdkCoin()` helper handles this. The REST API uses raw names (`SOL`).
+- **"Price must be divisible by tick size"**: Limit price has too many significant figures. Use `toPrecision(5)` not `toPrecision(6)`.
+- **`/dex/trade` 404**: You're polling with the wrong `baseShortId`. Use the **trader's** `baseShortId` from `signal.mimicMeta.baseShortId`, not your client-generated one.
 - **"Order has invalid size"**: Wrong szDecimals. SOL=2, BTC=5, ETH=4, XRP=0, DOGE=0.
 - **"No mid price for X"**: Asset not on HL. Check the coin name matches HL universe exactly.
 - **"Wrong signer recovery"**: Agent key expired (~90 day lifetime). User needs to re-authorize in Invo app.
@@ -567,7 +582,7 @@ All requests use `POST` with `Authorization: Bearer <jwt>`, `Content-Type: appli
 | `POST /v1_0/users/follow` | Follow user | `{objectId: userId}` |
 | `POST /v1_0/users/unfollow` | Unfollow user | `{objectId: userId}` |
 | `POST /dex/account/ready` | Check trading status | `{}` |
-| `POST /dex/trade` | Poll trade updates | `{investments: [{baseShortId, mimicStartedAt}]}` |
+| `POST /dex/trade` | Poll trade updates | `{investments: [{baseShortId, mimicStartedAt}]}` — **use the TRADER's baseShortId from the signal, NOT your client-generated one** |
 | `POST /dex/position/create` | Record open in Invo wallet | Full payload (see RecordOpenPayload) |
 | `POST /dex/position/close` | Record close in Invo wallet | Full payload (see RecordClosePayload) |
 | `GET /investment/status/:id` | Investment status | — |
@@ -578,7 +593,10 @@ All requests use `POST` with `Authorization: Bearer <jwt>`, `Content-Type: appli
 - `filter` values for feed: `trending`, `following`, `all`
 - `page` is nested inside `params`, NOT top-level (causes 500 if wrong)
 - `mimicMeta` requires 4 UUID-format strings — random UUIDs are accepted
-- `baseShortId` is a 10-char client-generated nanoid — needed to close via API
+- `baseShortId` is a 10-char nanoid. There are TWO different ones:
+  - **Trader's baseShortId** (from signal `mimicMeta.baseShortId`) — use this for `/dex/trade` polling
+  - **Your baseShortId** (client-generated in `trade.ts`) — use this for `/dex/position/close`
+  - Using your own baseShortId in `/dex/trade` causes 404 errors
 
 ### Hyperliquid Info API (`api.hyperliquid.xyz/info`)
 
@@ -592,10 +610,14 @@ All `POST` with `Content-Type: application/json`.
 
 ### Hyperliquid Exchange (via SDK)
 
-The `hyperliquid` npm SDK handles all exchange operations:
+The `hyperliquid` npm SDK (v1.7.7) handles all exchange operations:
 - `new Hyperliquid({privateKey: agentKey, walletAddress: masterWallet, enableWs: false})`
 - `sdk.exchange.updateLeverage(coin, 'isolated', leverage)`
 - `sdk.exchange.placeOrder({coin, is_buy, sz, limit_px, order_type: {limit: {tif: 'Ioc'}}, reduce_only: false, grouping: 'na', builder: INVO_BUILDER})`
+
+**CRITICAL — SDK coin name format:** The SDK uses its own `SymbolConversion` layer that expects `SOL-PERP` format, NOT the raw `SOL` that the REST API uses. The `hl-client.ts` helper `toSdkCoin()` auto-appends `-PERP` for `updateLeverage` and `placeOrder`. The REST API (`/info` endpoint for `meta`, `allMids`, `clearinghouseState`) still uses raw names like `SOL`.
+
+**CRITICAL — Price tick size:** HL requires limit prices with max 5 significant figures. The `placeMarketOrder` function uses `toPrecision(5)` on the slippage-adjusted price. Using `toPrecision(6)` or more causes `"Price must be divisible by tick size"` errors.
 
 **Builder fee**: `{address: '0x557edb253b1d7ed5f15b248a5a3fd919fa5d3c81', fee: 35}` (0.35%) — REQUIRED on all orders for Invo compatibility.
 
