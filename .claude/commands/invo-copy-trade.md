@@ -131,13 +131,10 @@ This runs **10 automated checks**:
 ---
 
 ## PHASE 1: DISCOVER & ANALYZE TRADERS
-
----
-
-## PHASE 1: DISCOVER & ANALYZE TRADERS
+> **CLI ONLY** — run the command below. Do NOT use browser tools.
 
 ```bash
-cd C:/Users/User/Invo && npx tsx src/commands/discover.ts
+cd ~/Invo && npx tsx src/commands/discover.ts
 ```
 
 **What it does under the hood:**
@@ -188,14 +185,15 @@ cd C:/Users/User/Invo && npx tsx src/commands/discover.ts
 ---
 
 ## PHASE 2: FOLLOW SELECTED TRADERS
+> **CLI ONLY** — run the command below. Do NOT use browser tools.
 
 ```bash
-cd C:/Users/User/Invo && npx tsx src/commands/follow.ts follow <ownerId1> <ownerId2> ...
+cd ~/Invo && npx tsx src/commands/follow.ts follow <ownerId1> <ownerId2> ...
 ```
 
 To unfollow:
 ```bash
-cd C:/Users/User/Invo && npx tsx src/commands/follow.ts unfollow <ownerId1> ...
+cd ~/Invo && npx tsx src/commands/follow.ts unfollow <ownerId1> ...
 ```
 
 **Output**: JSON with `action` and `results[]` (status per user).
@@ -216,16 +214,17 @@ cd C:/Users/User/Invo && npx tsx src/commands/follow.ts unfollow <ownerId1> ...
 ---
 
 ## PHASE 3: MONITOR FOR TRADE SIGNALS
+> **CLI ONLY** — run the command below. Do NOT use browser tools.
 
 Start the monitor as a **background process**:
 
 ```bash
-cd C:/Users/User/Invo && npx tsx src/commands/monitor.ts '["portfolioId1","portfolioId2"]'
+cd ~/Invo && npx tsx src/commands/monitor.ts '["portfolioId1","portfolioId2"]'
 ```
 
 Or with watch entries for active mimic positions:
 ```bash
-cd C:/Users/User/Invo && npx tsx src/commands/monitor.ts '[{"baseShortId":"x","mimicStartedAt":"2024-01-01T00:00:00Z"}]'
+cd ~/Invo && npx tsx src/commands/monitor.ts '[{"baseShortId":"x","mimicStartedAt":"2024-01-01T00:00:00Z"}]'
 ```
 
 **How it works:**
@@ -288,9 +287,10 @@ cd C:/Users/User/Invo && npx tsx src/commands/monitor.ts '[{"baseShortId":"x","m
 ---
 
 ## PHASE 4: EXECUTE TRADE (OPEN)
+> **CLI ONLY** — run the command below. Do NOT use browser tools.
 
 ```bash
-cd C:/Users/User/Invo && npx tsx src/commands/trade.ts <coin> <long|short> <size> [leverage] ['<mimicMetaJson>']
+cd ~/Invo && npx tsx src/commands/trade.ts <coin> <long|short> <size> [leverage] ['<mimicMetaJson>']
 ```
 
 **Arguments:**
@@ -367,9 +367,10 @@ npx tsx src/commands/trade.ts SOL long 0.14 5 '{"portfolioId":"<from discover>",
 ---
 
 ## PHASE 5: CLOSE POSITION
+> **CLI ONLY** — run the command below. Do NOT use browser tools.
 
 ```bash
-cd C:/Users/User/Invo && npx tsx src/commands/close.ts <coin> [baseShortId]
+cd ~/Invo && npx tsx src/commands/close.ts <coin> [baseShortId]
 ```
 
 **Arguments:**
