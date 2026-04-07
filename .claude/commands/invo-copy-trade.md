@@ -130,6 +130,75 @@ This runs **10 automated checks**:
 
 ---
 
+## CONFIGURATION: RISK & COPY CRITERIA
+
+**Before discovery, ask the user to configure their trading preferences.** Present the panel below with defaults, then let them adjust. Wait for confirmation before proceeding.
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  COPY TRADING CONFIGURATION                                         ║
+║  ═══════════════════════════════════════════════════════════════     ║
+║                                                                      ║
+║  DISCOVERY FILTERS                                                   ║
+║  ─────────────────────────────────────────────────────────────      ║
+║  Min Closed Trades:   100        (proven track record)               ║
+║  Min Active Days:     90         (at least 3 months)                 ║
+║  Min Win Rate:        75%        (consistency gate)                  ║
+║  Min P&L:             500%       (lifetime % return)                 ║
+║  Min Win/Loss Ratio:  3.0        (risk discipline)                   ║
+║  Max Traders:         4          (follow up to N traders)            ║
+║                                                                      ║
+║  COPY TRADING RULES                                                  ║
+║  ─────────────────────────────────────────────────────────────      ║
+║  Auto-Copy:           ON         (copy without asking)               ║
+║  Min WR to Auto-Copy: 80%        (below this → ask first)           ║
+║  Copy New Positions:  YES        (brand new trades)                  ║
+║  Copy Increases:      YES        (position size-ups)                 ║
+║  Copy Closes:         YES        (auto-close when they do)           ║
+║  Skip Decreases:      YES        (ignore partial closes)             ║
+║                                                                      ║
+║  RISK MANAGEMENT                          mode: MODERATE [2]        ║
+║  ─────────────────────────────────────────────────────────────      ║
+║  Risk Modes: [1] CONSERVATIVE  [2] MODERATE  [3] AGGRESSIVE         ║
+║              [4] FULL DEGEN                                          ║
+║                                                                      ║
+║  Max Leverage:        20x        (skip trades above this)            ║
+║  Max Position Size:   30%        (% of available balance)            ║
+║  Stop Loss:           -3%        (auto-close at this loss)           ║
+║  Take Profit:         +5%        (auto-close at this gain)           ║
+║  Blocked Assets:      none       (comma-separated, or 'none')       ║
+║  Only Assets:         any        (restrict to specific coins)        ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
+
+**Risk mode presets** (user picks 1-4, then can override individual values):
+
+| Mode | Max Lev | Position Size | Stop Loss | Take Profit |
+|---|---|---|---|---|
+| [1] CONSERVATIVE | 5x | 15% of balance | -2% | +3% |
+| [2] MODERATE | 20x | 30% of balance | -3% | +5% |
+| [3] AGGRESSIVE | 40x | 50% of balance | -5% | +10% |
+| [4] FULL DEGEN | 50x | 80% of balance | none | none |
+
+**Ask**: "Want to tweak anything, or lock it in?"
+
+Once confirmed, show:
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  ✓ CRITERIA LOCKED IN                                               ║
+║  Traders:  [summary of discovery filters]                           ║
+║  Auto-Copy: [ON/OFF] for traders with ≥ [X]% win rate              ║
+║  Risk Mode: [NAME] — Max [X]x lev | [X]% position | SL [X]%       ║
+║  Actions:   [which copy actions are on]                             ║
+║  >> Proceeding to trader discovery...                                ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
+
+**Use these locked-in criteria throughout all subsequent phases.** Discovery filters apply to `discover.ts` output filtering. Risk settings apply when evaluating and executing trades in Phases 4-5.
+
+---
+
 ## PHASE 1: DISCOVER & ANALYZE TRADERS
 > **CLI ONLY** — run the command below. Do NOT use browser tools.
 
