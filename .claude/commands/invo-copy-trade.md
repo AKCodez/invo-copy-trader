@@ -325,26 +325,34 @@ cd ~/Invo && npx tsx src/commands/monitor.ts '[{"baseShortId":"x","mimicStartedA
 }
 ```
 
-**Launch as a background process** that pipes to a log file:
+**Use `--wait-for-signal` mode for efficient, reactive monitoring.** This is the recommended approach — zero polling, zero wasted tokens:
 
 ```bash
-cd ~/Invo && npx tsx src/commands/monitor.ts '<portfolioIds>' > ~/Invo/monitor-output.log 2>&1 &
+cd ~/Invo && npx tsx src/commands/monitor.ts --wait-for-signal '["portfolioId1","portfolioId2"]'
 ```
 
-**CRITICAL: ACTIVE POLLING LOOP.** After launching the monitor, you MUST enter an active polling loop. Do NOT wait for the user to ask — proactively check for signals every 15-20 seconds:
+**How it works:**
+1. Launch via Bash with `run_in_background: true`
+2. The monitor polls the Invo API internally (feed every 15s, trades every 5s)
+3. It skips existing posts on startup (only reacts to NEW signals)
+4. **When a new signal arrives, it prints the signal JSON and exits**
+5. Claude gets auto-notified that the background process completed
+6. Claude reads the output, evaluates the signal, acts on it
+7. Claude relaunches the monitor for the next signal
 
-```bash
-tail -20 ~/Invo/monitor-output.log
-```
+**This is event-driven, not polling.** The agent is idle between signals (no token burn). The Node.js process does the polling server-side for free.
 
-Keep polling in a loop. When you see a `"type":"signal"` line, immediately:
-1. Parse the signal
+**When notified of a signal:**
+1. Parse the signal JSON from the process output
 2. Evaluate against the locked-in criteria (risk mode, max leverage, auto-copy threshold)
-3. If auto-copy is ON and trader meets the WR threshold → execute the trade automatically
-4. If below threshold → present the signal panel and ask the user
-5. Resume polling after action
+3. If auto-copy is ON and trader meets the WR threshold → execute the trade automatically via `trade.ts`
+4. If below threshold → present the SIGNAL DETECTED panel and ask the user
+5. **Relaunch the monitor** for the next signal
 
-**Do NOT stop polling.** The monitor runs indefinitely. You are the active listener.
+**Alternative: continuous mode** (without `--wait-for-signal`) runs forever and prints all signals. Use this if you want to `tail` a log file manually:
+```bash
+cd ~/Invo && npx tsx src/commands/monitor.ts '["portfolioId1"]' > ~/Invo/monitor-output.log 2>&1 &
+```
 
 **When a signal arrives, show:**
 ```

@@ -11,15 +11,22 @@ interface WatchEntry {
 }
 
 async function main() {
-  const arg = process.argv[2];
-  if (!arg) {
-    console.error('Usage: monitor <watchEntriesJson>');
-    console.error('  [{"baseShortId":"x","mimicStartedAt":"2024-01-01T00:00:00Z"}]');
-    console.error('  OR portfolio IDs: ["id1","id2"]');
+  const args = process.argv.slice(2);
+  const waitMode = args.includes('--wait-for-signal');
+  const jsonArg = args.find(a => a.startsWith('['));
+
+  if (!jsonArg) {
+    console.error('Usage: monitor [--wait-for-signal] <watchEntriesJson>');
+    console.error('  Portfolio IDs: \'["id1","id2"]\'');
+    console.error('  Watch entries: \'[{"baseShortId":"x","mimicStartedAt":"..."}]\'');
+    console.error('');
+    console.error('Modes:');
+    console.error('  default:             Run forever, print all signals as JSON lines');
+    console.error('  --wait-for-signal:   Exit after first signal (for agent auto-notify)');
     process.exit(1);
   }
 
-  const parsed = JSON.parse(arg);
+  const parsed = JSON.parse(jsonArg);
   const isWatchEntries = Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.baseShortId;
 
   const seenPosts = new Set<string>();
@@ -30,8 +37,9 @@ async function main() {
   const FEED_INTERVAL = 15_000;
   let lastFeedPoll = 0;
 
-  const poll = async () => {
+  const poll = async (): Promise<boolean> => {
     pollCount++;
+    let signalFound = false;
 
     // Poll /dex/trade if we have watch entries
     if (isWatchEntries) {
@@ -43,6 +51,7 @@ async function main() {
           if (!seenUpdates.has(key)) {
             seenUpdates.add(key);
             console.log(JSON.stringify({ type: 'trade_update', poll: pollCount, data: item }));
+            signalFound = true;
           }
         }
       } catch (e: any) {
@@ -77,6 +86,7 @@ async function main() {
                   portfolioId: update.portfolioId,
                 },
               }));
+              signalFound = true;
             }
           }
         }
@@ -84,17 +94,29 @@ async function main() {
         console.error(JSON.stringify({ type: 'error', source: 'feed', message: e.message }));
       }
     }
+
+    return signalFound;
   };
 
   console.log(JSON.stringify({
     type: 'started',
     mode: isWatchEntries ? 'trade_poll' : 'feed_only',
+    waitForSignal: waitMode,
     entries: parsed.length,
   }));
 
+  // Skip first feed poll results (existing posts, not new signals)
+  await poll();
+  const initialPostCount = seenPosts.size;
+
   while (true) {
-    await poll();
     await new Promise(r => setTimeout(r, TRADE_INTERVAL));
+    const found = await poll();
+
+    if (waitMode && found && seenPosts.size > initialPostCount) {
+      // In wait mode, exit after first NEW signal so the agent gets notified
+      process.exit(0);
+    }
   }
 }
 
