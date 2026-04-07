@@ -18,7 +18,7 @@
 
 ---
 
-`discover` | `follow` | `monitor` | `trade` | `close`
+`preflight` | `discover` | `follow` | `monitor` | `trade` | `close`
 
 </div>
 
@@ -28,20 +28,22 @@
 
 A fully autonomous copy trading system that connects [Invo](https://app.invoapp.com) (social trading platform) with [Hyperliquid](https://hyperliquid.xyz) (decentralized perpetual exchange). An AI agent discovers top-performing traders, follows them, monitors their trades in real-time, and mirrors their positions — all through reverse-engineered APIs. No browser automation. Pure Node.js.
 
+**How it works:** The agent scans Invo's social feed for verified trade signals from followed traders. When a trader opens or closes a position, the feed emits a post containing the full trade details (coin, direction, leverage, entry price) plus Invo metadata needed to record the copy trade. The agent evaluates the signal against your configured risk criteria and executes on Hyperliquid, recording the position on both platforms.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
 │   Claude Code (AI Agent)                                        │
-│   ├── Reasoning & analysis                                      │
-│   ├── Risk assessment                                           │
-│   └── Autonomous decision-making                                │
+│   ├── Reasoning & risk analysis                                 │
+│   ├── Signal evaluation against user criteria                   │
+│   └── Autonomous trade execution                                │
 │         │                                                       │
 │         ▼                                                       │
 │   Node.js CLI                                                   │
 │   ├── preflight.ts  ── 10-point readiness check                 │
 │   ├── discover.ts   ── scan & rank 100+ traders                 │
 │   ├── follow.ts     ── social graph management                  │
-│   ├── monitor.ts    ── real-time signal detection                │
+│   ├── monitor.ts    ── event-driven signal detection            │
 │   ├── trade.ts      ── open position (HL + Invo)                │
 │   └── close.ts      ── close position (HL + Invo)               │
 │         │                                                       │
@@ -70,6 +72,7 @@ npm install
 
 # Configure (see Credentials section below)
 cp .env.example .env
+# Edit .env with your credentials
 
 # Pre-flight check
 npx tsx src/commands/preflight.ts
@@ -78,7 +81,12 @@ npx tsx src/commands/preflight.ts
 /invo-copy-trade
 ```
 
+<!-- SKILL_INSTALL_PLACEHOLDER -->
+<!-- Installation instructions for the Claude Code skill will be added here once published to the skills marketplace. -->
+
 ## Commands
+
+All commands run via `npx tsx src/commands/<cmd>.ts`.
 
 | Command | Purpose | Example |
 |---|---|---|
@@ -87,8 +95,65 @@ npx tsx src/commands/preflight.ts
 | `discover.ts` | Scan & rank top traders | `npx tsx src/commands/discover.ts` |
 | `follow.ts` | Follow/unfollow traders | `npx tsx src/commands/follow.ts follow <userId>` |
 | `monitor.ts` | Real-time signal monitor | `npx tsx src/commands/monitor.ts '["portfolioId"]'` |
+| `monitor.ts` | Wait-for-signal mode | `npx tsx src/commands/monitor.ts --wait-for-signal '["id"]'` |
 | `trade.ts` | Open a position | `npx tsx src/commands/trade.ts SOL long 0.14 5` |
 | `close.ts` | Close a position | `npx tsx src/commands/close.ts SOL [baseShortId]` |
+
+## Signal Detection
+
+The monitor watches the Invo social feed for verified trade signals from followed traders. Each signal contains:
+
+```
+Feed post (postTypeId: "investment" | "update")
+  └── update
+      ├── ticker          → coin (SOL, BTC, ETH)
+      ├── directionLong   → true = long, false = short
+      ├── leverage         → leverage used
+      ├── entryPrice       → entry price
+      ├── closingPrice     → exit price (on close)
+      ├── isOpen           → position state
+      ├── verifiedTrade    → confirmed real Invo trade
+      ├── portfolio.id     → portfolioId (for mimicMeta)
+      ├── owner.id         → creatorInvoUserId (for mimicMeta)
+      ├── baseId           → trade base ID (for mimicMeta)
+      └── baseShortId      → needed to close on Invo
+```
+
+**Two monitor modes:**
+
+| Mode | Behavior | Use case |
+|---|---|---|
+| Default | Runs forever, prints JSON lines | Manual monitoring, log tailing |
+| `--wait-for-signal` | Exits after first new signal | Agent auto-notify (zero token burn while waiting) |
+
+In `--wait-for-signal` mode, the Node.js process polls server-side (free) and the AI agent is idle until a signal arrives. Event-driven, not polling-driven.
+
+## Copy Trading Flow
+
+```
+Signal detected: @trader opened SOL long 8x
+  │
+  ├── 1. Evaluate against locked-in criteria
+  │      ├── Leverage ≤ max? (e.g., 8x ≤ 20x ✓)
+  │      ├── Asset allowed? (SOL not blocked ✓)
+  │      ├── Trader WR ≥ auto-copy threshold? (86% ≥ 80% ✓)
+  │      └── Position size within limit? (30% of balance ✓)
+  │
+  ├── 2. Execute on Hyperliquid
+  │      ├── Set leverage (8x isolated)
+  │      ├── Place IOC limit order (+2% slippage, builder fee)
+  │      └── Verify fill
+  │
+  ├── 3. Record on Invo
+  │      ├── POST /dex/position/create
+  │      ├── mimicMeta from signal (portfolioId, ownerId, baseId)
+  │      └── Save baseShortId for exit
+  │
+  └── 4. Monitor for exit
+         └── When trader closes → mirror the exit via close.ts
+```
+
+**Exit strategy: mirror the trader.** We close when they close. No independent TP/SL — the whole point of copy trading is trusting the trader's entries AND exits.
 
 ## Credentials Setup
 
@@ -118,27 +183,35 @@ WALLET_ADDRESS=0x...         # Master wallet address
 1. Visible in your Invo profile page
 2. Or in the JWT payload under `trading_account.wallet_address`
 
+### Credential lifespan
+
+| Credential | TTL | Renewal |
+|---|---|---|
+| `INVO_REFRESH_TOKEN` | ~350 days | Re-extract from browser |
+| `HL_AGENT_KEY` | ~90 days | Re-authorize in Invo app |
+| `WALLET_ADDRESS` | Permanent | Never changes |
+
+The system auto-refreshes short-lived access tokens (10-min TTL) using the refresh token. No manual token management after initial setup.
+
 ## Reverse-Engineered API Surface
 
 ### Invo REST API (`api.invoapp.com`)
 
+All requests use `Authorization: Bearer <jwt>`, `Content-Type: application/json`, `x-app-version: 0.0.75`, `x-platform: web`.
+
 ```
-POST /v1_0/trending/get_portfolios_pl   → Discover traders
+GET  /v1_0/auth/refresh_token           → Refresh access token (10-min → 350-day cycle)
+POST /v1_0/trending/get_portfolios_pl   → Discover traders (filters: trending, all, user)
 POST /v1_0/trending/get_users           → Trending users
-POST /v1_0/posts/get_feed               → Social feed
+POST /v1_0/posts/get_feed               → Social feed (filters: trending, following, all)
 POST /v1_0/users/follow                 → Follow user
 POST /v1_0/users/unfollow               → Unfollow user
-POST /dex/account/ready                 → Account readiness
+POST /dex/account/ready                 → Account readiness check
 POST /dex/trade                         → Trade status polling
 POST /dex/position/create               → Record open in Invo wallet
 POST /dex/position/close                → Record close in Invo wallet
-GET  /v1_0/auth/refresh_token           → Refresh access token (350d)
 GET  /investment/status/:id             → Investment status
 ```
-
-All requests use `Authorization: Bearer <jwt>` with headers `x-app-version: 0.0.75`, `x-platform: web`.
-
-Auto-refresh: access tokens expire in ~10 minutes. The client automatically refreshes using the long-lived refresh token before every request.
 
 ### Hyperliquid Exchange
 
@@ -154,7 +227,7 @@ Builder fee: `0x557edb253b1d7ed5f15b248a5a3fd919fa5d3c81` at 0.35% — required 
 
 ## Discovery Criteria
 
-The `discover.ts` scanner applies strict quality filters:
+The `discover.ts` scanner applies strict quality filters (configurable via the agent):
 
 ```
 closedPositions  >= 100     # Proven track record
@@ -166,26 +239,6 @@ liquidated       == false   # Never blown up
 ```
 
 Composite score: `W/L*20 + WinRate*1.5 + P&L*0.01 + Streak*2 - Losses*0.5`
-
-## Trade Execution Flow
-
-```
-trade.ts SOL long 0.14 5
-  │
-  ├── 1. Connect HL SDK (agent key + wallet)
-  ├── 2. Lookup asset index (SOL = 5, szDecimals = 2)
-  ├── 3. Set leverage (5x isolated)
-  ├── 4. Snapshot position before
-  ├── 5. Place IOC limit order (+2% slippage, builder fee)
-  ├── 6. Snapshot position after
-  ├── 7. Record on Invo (POST /dex/position/create)
-  │      └── mimicMeta (4 UUID fields)
-  │      └── submission (hlOrder + hlResponse)
-  │      └── summary (qtyBefore, qtyAfter, leverage)
-  └── 8. Output: fill details + baseShortId
-```
-
-The `baseShortId` is a 10-char client-generated ID required to close positions via the Invo API.
 
 ## Asset Reference
 
@@ -206,6 +259,7 @@ The `baseShortId` is a 10-char client-generated ID required to close positions v
 | `"Order has invalid size"` | Wrong szDecimals for the asset | Check asset table above |
 | `"Order price cannot be more than 95% away"` | Position too large for available margin | Reduce size |
 | Agent key expired | ~90-day validity | Re-authorize in Invo app |
+| Feed signal delay | Trade posts appear 1-10s after execution | Acceptable for copy trading (not HFT) |
 
 ## Tech Stack
 
@@ -213,7 +267,8 @@ The `baseShortId` is a 10-char client-generated ID required to close positions v
 - **HL SDK**: `hyperliquid` (^1.7.7) — handles EIP-712 signing, msgpack, order placement
 - **HTTP**: Native `fetch()` — no axios, no browser
 - **Auth**: JWT auto-refresh via reverse-engineered `/v1_0/auth/refresh_token` endpoint
-- **Crypto**: AES-GCM decryption of FlutterSecureStorage tokens
+- **Signal detection**: Invo social feed polling with verified trade filtering
+- **Agent integration**: Claude Code skill (`/invo-copy-trade`) for autonomous operation
 
 ## Disclaimer
 
