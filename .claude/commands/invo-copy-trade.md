@@ -148,38 +148,42 @@ This runs **10 automated checks**:
 ║  Min Win/Loss Ratio:  3.0        (risk discipline)                   ║
 ║  Max Traders:         4          (follow up to N traders)            ║
 ║                                                                      ║
-║  COPY TRADING RULES                                                  ║
+║  COPY BEHAVIOR                                                       ║
 ║  ─────────────────────────────────────────────────────────────      ║
 ║  Auto-Copy:           ON         (copy without asking)               ║
 ║  Min WR to Auto-Copy: 80%        (below this → ask first)           ║
-║  Copy New Positions:  YES        (brand new trades)                  ║
-║  Copy Increases:      YES        (position size-ups)                 ║
-║  Copy Closes:         YES        (auto-close when they do)           ║
+║  Copy Opens:          YES        (mirror new positions)              ║
+║  Copy Closes:         YES        (mirror exits when they close)      ║
+║  Copy Increases:      YES        (mirror position size-ups)          ║
 ║  Skip Decreases:      YES        (ignore partial closes)             ║
 ║                                                                      ║
-║  RISK MANAGEMENT                          mode: MODERATE [2]        ║
+║  RISK LIMITS                              mode: MODERATE [2]        ║
 ║  ─────────────────────────────────────────────────────────────      ║
 ║  Risk Modes: [1] CONSERVATIVE  [2] MODERATE  [3] AGGRESSIVE         ║
 ║              [4] FULL DEGEN                                          ║
 ║                                                                      ║
 ║  Max Leverage:        20x        (skip trades above this)            ║
-║  Max Position Size:   30%        (% of available balance)            ║
-║  Stop Loss:           -3%        (auto-close at this loss)           ║
-║  Take Profit:         +5%        (auto-close at this gain)           ║
+║  Max Position Size:   30%        (% of available balance per trade)  ║
 ║  Blocked Assets:      none       (comma-separated, or 'none')       ║
 ║  Only Assets:         any        (restrict to specific coins)        ║
+║                                                                      ║
+║  EXIT STRATEGY: Mirror the trader. When they close, we close.        ║
+║  We do NOT set independent TP/SL — the whole point of copy trading   ║
+║  is trusting the trader's entries AND exits.                         ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
 **Risk mode presets** (user picks 1-4, then can override individual values):
 
-| Mode | Max Lev | Position Size | Stop Loss | Take Profit |
-|---|---|---|---|---|
-| [1] CONSERVATIVE | 5x | 15% of balance | -2% | +3% |
-| [2] MODERATE | 20x | 30% of balance | -3% | +5% |
-| [3] AGGRESSIVE | 40x | 50% of balance | -5% | +10% |
-| [4] FULL DEGEN | 50x | 80% of balance | none | none |
+| Mode | Max Leverage | Max Position Size | Philosophy |
+|---|---|---|---|
+| [1] CONSERVATIVE | 5x | 15% of balance | Small positions, skip high-lev trades |
+| [2] MODERATE | 20x | 30% of balance | Balanced — mirrors most trades |
+| [3] AGGRESSIVE | 40x | 50% of balance | Mirrors everything including high-lev |
+| [4] FULL DEGEN | 50x | 80% of balance | No limits, full send |
+
+**Exit strategy is always: mirror the trader.** Risk modes only control which trades we _enter_ (leverage cap, size cap, asset filter). Once we're in a position, we close when the trader closes — that's copy trading.
 
 **Ask**: "Want to tweak anything, or lock it in?"
 
@@ -189,8 +193,9 @@ Once confirmed, show:
 ║  ✓ CRITERIA LOCKED IN                                               ║
 ║  Traders:  [summary of discovery filters]                           ║
 ║  Auto-Copy: [ON/OFF] for traders with ≥ [X]% win rate              ║
-║  Risk Mode: [NAME] — Max [X]x lev | [X]% position | SL [X]%       ║
-║  Actions:   [which copy actions are on]                             ║
+║  Risk Mode: [NAME] — Max [X]x lev | [X]% position size             ║
+║  Exit:     Mirror trader closes (no independent TP/SL)              ║
+║  Actions:  Copy opens ✓  closes ✓  increases ✓                     ║
 ║  >> Proceeding to trader discovery...                                ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
@@ -518,16 +523,15 @@ You are not a passive executor — you are an **autonomous trading agent**. Make
    - Does this align with the trader's usual pattern?
    - Are multiple top traders converging on the same trade? (High conviction)
 
-4. **Position sizing**: Account balance is ~$53. Size positions conservatively:
-   - Max 20-30% of balance per trade (~$10-15 notional)
-   - Higher conviction = larger size (up to 40%)
-   - Never risk more than 5% of balance on a single loss scenario
+4. **Position sizing**: Use the locked-in max position size % from configuration. Scale within that limit based on conviction:
+   - Multiple traders converging on same trade → use full allowed size
+   - Single trader, strong streak → 75% of allowed size
+   - Single trader, average stats → 50% of allowed size
 
-5. **Exit strategy**: Close when:
-   - The copied trader closes (mirror exit)
-   - P&L hits +5% (take profit)
-   - P&L hits -3% (stop loss — protect capital)
-   - A close signal comes from the monitor
+5. **Exit strategy**: Mirror the trader. This is copy trading — we trust their exits.
+   - When the copied trader closes → we close (via monitor close signal)
+   - If multiple traders are in the same direction and one closes → hold (still have confirmation)
+   - Manual override only if the user explicitly requests it
 
 ### State Management
 
