@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+.claude/plans/
+.claude/projects/
+.claude/memory/
