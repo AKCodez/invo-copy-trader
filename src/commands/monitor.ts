@@ -16,7 +16,7 @@ async function main() {
   const jsonArg = args.find(a => a.startsWith('['));
 
   if (!jsonArg) {
-    console.error('Usage: monitor [--wait-for-signal] <watchEntriesJson>');
+    console.error('Usage: monitor [--wait-for-signal] <portfolioIdsOrWatchEntries>');
     console.error('  Portfolio IDs: \'["id1","id2"]\'');
     console.error('  Watch entries: \'[{"baseShortId":"x","mimicStartedAt":"..."}]\'');
     console.error('');
@@ -32,10 +32,10 @@ async function main() {
   const seenPosts = new Set<string>();
   const seenUpdates = new Set<string>();
   let pollCount = 0;
+  let isFirstFeedPoll = true;
 
   const TRADE_INTERVAL = 5_000;
-  const FEED_INTERVAL = 15_000;
-  let lastFeedPoll = 0;
+  const FEED_INTERVAL = 5_000; // 5s for faster signal detection
 
   const poll = async (): Promise<boolean> => {
     pollCount++;
@@ -59,40 +59,75 @@ async function main() {
       }
     }
 
-    // Poll feed less frequently
-    const now = Date.now();
-    if (now - lastFeedPoll >= FEED_INTERVAL) {
-      lastFeedPoll = now;
-      try {
-        const data = await invo.getFeed('following', null, 20);
-        const items = data.items ?? [];
-        for (const post of items) {
-          if (!seenPosts.has(post.id)) {
-            seenPosts.add(post.id);
-            const update = post.update;
-            if (update?.type === 'trade' || update?.type === 'open' || update?.type === 'close') {
-              console.log(JSON.stringify({
-                type: 'signal',
-                poll: pollCount,
-                postId: post.id,
-                owner: update.owner ?? post.owner,
-                trade: {
-                  action: update.type,
-                  coin: update.coin ?? update.asset,
-                  side: update.side,
-                  leverage: update.leverage,
-                  size: update.size ?? update.qty,
-                  price: update.price ?? update.entryPrice,
-                  portfolioId: update.portfolioId,
-                },
-              }));
-              signalFound = true;
-            }
-          }
-        }
-      } catch (e: any) {
-        console.error(JSON.stringify({ type: 'error', source: 'feed', message: e.message }));
+    // Poll feed for trade signals from followed traders
+    try {
+      const data = await invo.getFeed('following', null, 20);
+      const posts = data.items ?? [];
+      for (const post of posts) {
+        if (seenPosts.has(post.id)) continue;
+        seenPosts.add(post.id);
+
+        // Skip non-trade posts (photos, text, etc.)
+        const update = post.update;
+        if (!update || !update.ticker) continue;
+
+        // Skip first poll results (existing posts, not new signals)
+        if (isFirstFeedPoll) continue;
+
+        // Only process verified trades
+        if (!update.verifiedTrade) continue;
+
+        const isOpen = update.isOpen === true;
+        const isClosed = update.isOpen === false && update.closingPrice != null;
+        const isIncrease = update.changes?.isAdded === false && isOpen;
+
+        let action: string;
+        if (isClosed) action = 'close';
+        else if (update.changes?.isAdded !== false) action = 'open';
+        else action = 'increase';
+
+        console.log(JSON.stringify({
+          type: 'signal',
+          poll: pollCount,
+          postId: post.id,
+          action,
+          owner: {
+            id: update.owner?.id ?? post.owner?.id,
+            username: update.owner?.username ?? post.owner?.username,
+          },
+          trade: {
+            coin: update.ticker,
+            name: update.name,
+            side: update.directionLong ? 'long' : 'short',
+            leverage: update.leverage,
+            entryPrice: update.entryPrice,
+            closingPrice: update.closingPrice ?? null,
+            entrySize: update.entrySize,
+            isOpen,
+          },
+          portfolio: {
+            id: update.portfolio?.id,
+            title: update.portfolio?.title,
+            winRate: update.portfolio?.winRate,
+            closedPositions: update.portfolio?.closedPositionsCount,
+            openPositions: update.portfolio?.openPositionsCount,
+            pnl: update.portfolio?.plSnapshot,
+          },
+          mimicMeta: {
+            portfolioId: update.portfolio?.id,
+            creatorInvoUserId: update.owner?.id ?? post.owner?.id,
+            baseId: update.baseId,
+            baseShortId: update.baseShortId,
+          },
+        }));
+        signalFound = true;
       }
+
+      if (isFirstFeedPoll) {
+        isFirstFeedPoll = false;
+      }
+    } catch (e: any) {
+      console.error(JSON.stringify({ type: 'error', source: 'feed', message: e.message }));
     }
 
     return signalFound;
@@ -105,16 +140,14 @@ async function main() {
     entries: parsed.length,
   }));
 
-  // Skip first feed poll results (existing posts, not new signals)
+  // First poll: index existing posts so we only react to new ones
   await poll();
-  const initialPostCount = seenPosts.size;
 
   while (true) {
-    await new Promise(r => setTimeout(r, TRADE_INTERVAL));
+    await new Promise(r => setTimeout(r, FEED_INTERVAL));
     const found = await poll();
 
-    if (waitMode && found && seenPosts.size > initialPostCount) {
-      // In wait mode, exit after first NEW signal so the agent gets notified
+    if (waitMode && found) {
       process.exit(0);
     }
   }

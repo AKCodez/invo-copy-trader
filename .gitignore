@@ -4,3 +4,4 @@ dist/
 .claude/plans/
 .claude/projects/
 .claude/memory/
+monitor-output.log
