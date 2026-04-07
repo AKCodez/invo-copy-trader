@@ -325,7 +325,26 @@ cd ~/Invo && npx tsx src/commands/monitor.ts '[{"baseShortId":"x","mimicStartedA
 }
 ```
 
-**Run in background** using Bash `run_in_background: true`. Periodically read the output file to check for signals.
+**Launch as a background process** that pipes to a log file:
+
+```bash
+cd ~/Invo && npx tsx src/commands/monitor.ts '<portfolioIds>' > ~/Invo/monitor-output.log 2>&1 &
+```
+
+**CRITICAL: ACTIVE POLLING LOOP.** After launching the monitor, you MUST enter an active polling loop. Do NOT wait for the user to ask — proactively check for signals every 15-20 seconds:
+
+```bash
+tail -20 ~/Invo/monitor-output.log
+```
+
+Keep polling in a loop. When you see a `"type":"signal"` line, immediately:
+1. Parse the signal
+2. Evaluate against the locked-in criteria (risk mode, max leverage, auto-copy threshold)
+3. If auto-copy is ON and trader meets the WR threshold → execute the trade automatically
+4. If below threshold → present the signal panel and ask the user
+5. Resume polling after action
+
+**Do NOT stop polling.** The monitor runs indefinitely. You are the active listener.
 
 **When a signal arrives, show:**
 ```
