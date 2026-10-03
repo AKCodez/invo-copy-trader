@@ -12,7 +12,7 @@ export function validateEnv() {
   if (!WALLET_ADDRESS) missing.push('WALLET_ADDRESS');
   if (missing.length) {
     console.error(`Missing .env vars: ${missing.join(', ')}`);
-    console.error('Create C:\\Users\\User\\Invo\\.env with:');
+    console.error('Create ~/invo-copy-trader/.env with:');
     console.error('  INVO_REFRESH_TOKEN=eyJ...  (350-day TTL, preferred)');
     console.error('  INVO_TOKEN=Bearer eyJ...   (optional, ~10 min TTL)');
     console.error('  HL_AGENT_KEY=0x...');

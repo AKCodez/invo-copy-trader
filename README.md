@@ -44,8 +44,9 @@ A fully autonomous copy trading system that connects [Invo](https://app.invoapp.
 │   ├── discover.ts   ── scan & rank 100+ traders                 │
 │   ├── follow.ts     ── social graph management                  │
 │   ├── monitor.ts    ── event-driven signal detection            │
-│   ├── trade.ts      ── open position (HL + Invo)                │
-│   └── close.ts      ── close position (HL + Invo)               │
+│   ├── trade.ts      ── open / add to a copy (HL + Invo)         │
+│   ├── close.ts      ── close / reduce one trader's copy         │
+│   └── tpsl.ts       ── mirror the trader's TP/SL                │
 │         │                                                       │
 │    ┌────┴────────────────────┐                                  │
 │    ▼                         ▼                                  │
@@ -94,15 +95,20 @@ All commands run via `npx tsx src/commands/<cmd>.ts`.
 | `verify.ts` | Endpoint health check (8 endpoints) | `npx tsx src/commands/verify.ts` |
 | `discover.ts` | Scan & rank top traders | `npx tsx src/commands/discover.ts` |
 | `follow.ts` | Follow/unfollow traders | `npx tsx src/commands/follow.ts follow <userId>` |
-| `monitor.ts` | Real-time signal monitor | `npx tsx src/commands/monitor.ts '["portfolioId"]'` |
-| `monitor.ts` | Feed + trade polling | `npx tsx src/commands/monitor.ts '["pId"]' '[{"baseShortId":"x","mimicStartedAt":"..."}]'` |
-| `monitor.ts` | Wait-for-signal mode | `npx tsx src/commands/monitor.ts --wait-for-signal '["id"]'` |
-| `trade.ts` | Open a position | `npx tsx src/commands/trade.ts SOL long 0.14 5` |
-| `close.ts` | Close a position | `npx tsx src/commands/close.ts SOL [baseShortId]` |
+| `monitor.ts` | Real-time signal monitor (your Invo following list) | `npx tsx src/commands/monitor.ts` |
+| `monitor.ts` | Extra /dex/trade watch entries (open copies are polled automatically) | `npx tsx src/commands/monitor.ts '[{"baseShortId":"x","mimicStartedAt":"..."}]'` |
+| `monitor.ts` | Wait-for-signal mode (resumes from `data/monitor-state.json`; missed opens copied only if stopped ≤ `--max-catchup`, default 300s) | `npx tsx src/commands/monitor.ts --wait-for-signal` |
+| `trade.ts` | Copy an open, or the trader's increase | `npx tsx src/commands/trade.ts '<open or increase signal JSON>'` |
+| `trade.ts` | Open a position (copies nobody) | `npx tsx src/commands/trade.ts SOL long auto 5 manual` |
+| `close.ts` | Close one trader's copy, or reduce it by the trader's partial close | `npx tsx src/commands/close.ts '<close or decrease signal JSON>'` |
+| `tpsl.ts` | Set/move our TP or SL to the trader's | `npx tsx src/commands/tpsl.ts '<tpsl signal JSON>'` |
+| `close.ts` | Flatten a coin (explicit user request) | `npx tsx src/commands/close.ts SOL manual` |
 
 ## Signal Detection
 
-The monitor watches the Invo social feed for verified trade signals from followed traders. Each signal contains:
+The monitor copies **only the traders your Invo account currently follows**. At startup it loads your following list (`POST /v1_0/users/get_following`) and resolves each trader's portfolios (`POST /v1_0/portfolios/v2/get_users_portfolios`), then re-fetches the list every 60s (`--refresh=<sec>`, min 10) and on demand when the feed shows an unknown trader. Follow or unfollow people in the Invo app — the monitor picks it up on the next refresh or restart and prints a `following_changed` line. It never follows or unfollows anyone itself, and exits if the following list can't be loaded at startup.
+
+A feed post becomes a `signal` only if it's a verified trade (`verifiedTrade: true`), not a repost, its owner is in the current following list, and its portfolio belongs to that trader. Open and increase signals must also include the trader's trade IDs (`id`, `baseId`, `baseShortId`); close signals don't need them. Other trade posts are logged to stderr as `{"type":"skipped","reason":...}`. Each signal contains:
 
 ```
 Feed post (postTypeId: "investment" | "update")
@@ -114,10 +120,11 @@ Feed post (postTypeId: "investment" | "update")
       ├── closingPrice     → exit price (on close)
       ├── isOpen           → position state
       ├── verifiedTrade    → confirmed real Invo trade
-      ├── portfolio.id     → portfolioId (for mimicMeta)
-      ├── owner.id         → creatorInvoUserId (for mimicMeta)
-      ├── baseId           → trade base ID (for mimicMeta)
-      └── baseShortId      → needed to close on Invo
+      ├── portfolio.id     → mimicMeta.portfolioId
+      ├── owner.id         → mimicMeta.creatorInvoUserId
+      ├── id               → mimicMeta.initialSourcePaperUpdateId
+      ├── baseId           → mimicMeta.sourcePaperTradeBaseId
+      └── baseShortId      → mimicMeta.sourcePaperTradeBaseShortId (trader's; for /dex/trade polling)
 ```
 
 **Two monitor modes:**
@@ -131,6 +138,22 @@ In `--wait-for-signal` mode, the Node.js process polls server-side (free) and th
 
 ## Copy Trading Flow
 
+A copy replicates the trader's trade — asset, direction, leverage, entry price,
+TP/SL, increases, partial closes, closes and liquidations — and differs only in
+size, which comes from **our** Hyperliquid equity (5–15%), never the trader's
+dollar amount or account %. All parameters are taken from the monitor's signal
+JSON, never typed separately. Anything that can't be replicated exactly is
+refused rather than approximated:
+
+| Trader does | We do | Refused when |
+|---|---|---|
+| Opens (feed `open`) | `trade.ts`: their coin, side, leverage (isolated); IOC limit ≤ 2% worse than their entry price; size clamped so all active copies stay within 80% of equity | posted > 300s ago (or no post time); price already moved > 2% against their entry; leverage over HL max or ≠ the coin's existing leverage; any trigger/TP/SL order in the coin |
+| Opens with TP/SL | Their exact prices as HL position TP/SL after the fill | price not exactly placeable; already crossed; coin position shared with other trades |
+| Adds (`/dex/trade` `increase`) | `trade.ts`: same % of our copy (in coins, from the $ figures in Invo's feed post for the change), capped at the room left under 80% of equity for all active copies, and at the tier % of equity (≤ 15%), the room left under 15% of equity for the whole copy, and 80% of the copy (or coin position, if smaller) | older than 300s; copy already at 15% of equity; under $10 |
+| Partial close (`decrease`) | `close.ts`: same % of our copy (from the $ figures in Invo's feed post for the change), reduce-only | under $10 (except a full close); live position smaller than the copies tracked in it; no feed post with $ figures within 120s, or figures that don't reconcile (adds too) |
+| Sets/moves TP/SL (`tp`/`sl`) | `tpsl.ts`: cancel ours, place theirs | copy isn't the whole coin position; a TP/SL we didn't place; no price given (removal not seen yet) |
+| Closes / TP or SL hit / liquidated | `close.ts`: close the copy (reduce-only) | — (already gone → `already_closed`) |
+
 ```
 Signal detected: @trader opened SOL long 8x
   │
@@ -138,23 +161,35 @@ Signal detected: @trader opened SOL long 8x
   │      ├── Leverage ≤ max? (e.g., 8x ≤ 20x ✓)
   │      ├── Asset allowed? (SOL not blocked ✓)
   │      ├── Trader WR ≥ auto-copy threshold? (86% ≥ 80% ✓)
-  │      └── Position size within limit? (30% of balance ✓)
+  │      └── Size computed in code (src/sizing.ts) from fresh account equity:
+  │          initial 5-15% of equity by trader tier (poor 5%, average 7.8/10.4%,
+  │          strong 15%; never under HL's $10 minimum, refused under $66.67 equity);
+  │          increases: the trader's add in proportion to our copy, capped at
+  │          tier % (≤ 15%), 15% of equity for the whole copy, and 80% of the copy
   │
   ├── 2. Execute on Hyperliquid
-  │      ├── Set leverage (8x isolated)
-  │      ├── Place IOC limit order (+2% slippage, builder fee)
-  │      └── Verify fill
+  │      ├── Set the trader's leverage (8x isolated)
+  │      ├── Place IOC limit order (≤ 2% worse than the trader's entry, builder fee)
+  │      ├── Verify fill
+  │      └── Place the trader's TP/SL (position TP/SL, exact prices)
   │
   ├── 3. Record on Invo
   │      ├── POST /dex/position/create
-  │      ├── mimicMeta from signal (portfolioId, ownerId, baseId)
-  │      └── Save baseShortId for exit
+  │      ├── mimicMeta from signal, passed unchanged (validated before any order)
+  │      └── Output: sourceBaseShortId (trader's) + positionRecordId (ours)
   │
   └── 4. Monitor for exit
-         └── When trader closes → mirror the exit via close.ts
+         ├── Trader adds / reduces / changes TP/SL → trade.ts / close.ts / tpsl.ts
+         │      with that change signal (from /dex/trade; each applied once)
+         └── When trader closes → close.ts with the close signal
+                closes only that trader's copy (matched in data/copy-ledger.json);
+                other copies in the same coin stay open. Unmatched → refused.
+                Open copies are also polled on /dex/trade, so a close is seen
+                even after an unfollow. trade/close run one at a time (lock file)
+                and record every order as pending before sending it.
 ```
 
-**Exit strategy: mirror the trader.** We close when they close. No independent TP/SL — the whole point of copy trading is trusting the trader's entries AND exits.
+**Exit strategy: mirror the trader.** We close when they close, reduce when they reduce, and use their TP/SL — never one of our own. The whole point of copy trading is trusting the trader's entries AND exits.
 
 ## Credentials Setup
 
@@ -207,8 +242,11 @@ POST /v1_0/trending/get_users           → Trending users
 POST /v1_0/posts/get_feed               → Social feed (filters: trending, following, all)
 POST /v1_0/users/follow                 → Follow user
 POST /v1_0/users/unfollow               → Unfollow user
+GET  /v1_0/users/get_user               → Current user (id)
+POST /v1_0/users/get_following          → Users you follow {userId, query, params: {page, size}}
+POST /v1_0/portfolios/v2/get_users_portfolios → A user's portfolios {userId, params: {isDeleted, page, size}}
 POST /dex/account/ready                 → Account readiness check
-POST /dex/trade                         → Trade status polling
+POST /dex/trade                         → Trade status polling (data[].updates[].updateType: close, tp, sl)
 POST /dex/position/create               → Record open in Invo wallet
 POST /dex/position/close                → Record close in Invo wallet
 GET  /investment/status/:id             → Investment status
@@ -255,13 +293,13 @@ Composite score: `W/L*20 + WinRate*1.5 + P&L*0.01 + Streak*2 - Losses*0.5`
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `reduce_only: true` breaks signing | Phantom agent EIP-712 signature recovery fails | Always use `reduce_only: false` |
-| `grouping: 'normalTpsl'` breaks signing | Multi-order grouping causes wrong signer | Always use `grouping: 'na'` |
+| `reduce_only: true` was reported to break signing | Phantom agent EIP-712 signature recovery failed | Unconfirmed: the SDK encodes the flag the same either way and its own `marketClose` uses `true`. Opens use `false`; closes use `true` so they can never flip a position. If a close fails with a signer error, it reports `not_filled` with `orderError` |
+| `grouping: 'normalTpsl'` breaks signing | Reported upstream (unconfirmed): multi-order grouping causes wrong signer | Entry/close orders use `'na'`. TP/SL are separate `positionTpsl` orders as the Invo app sends them — not yet confirmed live from this tool; a rejection is reported as `tpsl.error` (non-zero exit) |
 | `"Unknown asset: SOL"` | SDK expects `-PERP` suffix | Use `SOL-PERP`, `BTC-PERP`, etc. (handled in `hl-client.ts`) |
-| `"Price must be divisible by tick size"` | Too many decimal places | Use `toPrecision(5)` on prices (handled in `hl-client.ts`) |
+| `"Price must be divisible by tick size"` | More than 5 significant figures, or more than `6 − szDecimals` decimals | Both limits applied by `limitPrice` in `sizing.ts` (rounded away from mid) |
 | `"Order has invalid size"` | Wrong szDecimals for the asset | Check asset table above |
 | `"Order price cannot be more than 95% away"` | Position too large for available margin | Reduce size |
-| `/dex/trade` returns 404 | Using your own `baseShortId` instead of the trader's | Use the trader's `baseShortId` from their feed signal |
+| `/dex/trade` returns 404 | Polling with a `baseShortId` that isn't the trader's | Use `signal.mimicMeta.sourcePaperTradeBaseShortId` (= `trade.ts` `sourceBaseShortId`) |
 | Agent key expired | ~90-day validity | Re-authorize in Invo app |
 | Feed signal delay | Trade posts appear 1-10s after execution | Acceptable for copy trading (not HFT) |
 

@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test": "tsx --test src/*.test.ts"
+  },
   "dependencies": {
     "hyperliquid": "^1.7.7"
   },
